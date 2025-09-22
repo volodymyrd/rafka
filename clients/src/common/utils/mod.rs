@@ -1,140 +1,119 @@
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use std::io::{self};
-
 /// This module exposes low-level methods for reading/writing from byte streams or buffers.
 pub mod byte_utils {
-    use super::*;
-    use std::io::Cursor;
+    use std::io::{self};
 
-    /// Read an unsigned 32-bit integer from a reader, advancing the position by 4 bytes.
+    /// Reads a 4-byte unsigned integer from a buffer, advancing the buffer's position by 4 bytes.
     ///
-    /// This function reads four bytes in big-endian order and returns the value
-    /// as a signed 64-bit integer, which is the equivalent of Java's `long`.
+    /// This function is analogous to `ByteBuffer.getInt() & 0xffffffffL` in Java,
+    /// which reads a 32-bit signed integer and then masks it to be treated as an unsigned 32-bit
+    /// value.
+    /// In Rust, this is achieved more directly by reading bytes and converting them into a `u32`
+    /// (unsigned 32-bit integer).
     ///
     /// # Arguments
     ///
-    /// * `reader` - The data source to read from, which must implement `std::io::Read`.
+    /// * `buffer` - A mutable reference to a type that implements the `std::io::Read` trait.
     ///
     /// # Returns
     ///
-    /// The unsigned 32-bit integer read, as an `i64`, or an `io::Result` error if the read fails.
-    pub fn read_unsigned_int<R: io::Read>(reader: &mut R) -> io::Result<i64> {
-        Ok(reader.read_u32::<BigEndian>()? as i64)
+    /// The unsigned 32-bit integer read from the buffer as a `u32`.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if it fails to read exactly 4 bytes from the buffer.
+    /// ```
+    pub fn read_unsigned_int(buffer: &mut dyn io::Read) -> u32 {
+        let mut bytes = [0; 4];
+        buffer.read_exact(&mut bytes).unwrap();
+        u32::from_be_bytes(bytes)
     }
 
-    /// Read an unsigned 32-bit integer from a specific position in a byte slice.
+    /// Reads a 4-byte unsigned integer from a specific index in a byte slice.
     ///
-    /// This function reads four bytes from the given index in big-endian order and
-    /// returns the value as a 64-bit signed integer, mirroring Java's `long` return type.
+    /// This function does not modify the position of the underlying buffer. It is analogous
+    /// to `ByteBuffer.getInt(index)` in Java, which provides indexed, non-sequential access.
     ///
     /// # Arguments
     ///
-    /// * `buffer` - The byte slice to read from.
-    /// * `index` - The starting index in the slice from which to read the integer.
+    /// * `buffer` - A reference to the byte slice to read from.
+    /// * `index` - The starting byte index from which to read the 4-byte integer.
     ///
     /// # Returns
     ///
-    /// The unsigned 32-bit integer read, as an `i64`, or an `io::Result` error if the read fails.
-    pub fn read_unsigned_int_from_pos(buffer: &[u8], index: usize) -> io::Result<i64> {
-        // Ensure the index and length are valid before attempting to read.
-        if buffer.len() < index + 4 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "index out of bounds",
-            ));
-        }
-
-        // Create a cursor from the sub-slice starting at the given index.
-        // This allows us to use standard `Read` trait methods.
-        let mut reader = Cursor::new(&buffer[index..]);
-
-        // Read a u32 (unsigned 32-bit integer) in big-endian format.
-        // The `?` operator propagates any I/O error.
-        let value = reader.read_u32::<BigEndian>()?;
-
-        // Cast the u32 to an i64 to match the Java `long` return type.
-        Ok(value as i64)
+    /// The unsigned 32-bit integer read from the buffer as a `u32`.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the provided `index` is out of bounds or if there are
+    /// fewer than 4 bytes available from the given index.
+    pub fn read_unsigned_int_at(buffer: &[u8], index: usize) -> u32 {
+        let bytes: [u8; 4] = buffer[index..index + 4].try_into().unwrap();
+        u32::from_be_bytes(bytes)
     }
 
-    /// Read a big-endian signed 32-bit integer from a byte slice at a given offset.
+    /// Reads a 4-byte signed integer from a specific index in a byte slice in big-endian byte
+    /// order.
     ///
-    /// This function uses the `byteorder` crate to safely read four bytes from the
-    /// specified position and convert them into a 32-bit signed integer.
+    /// This function is the Rust equivalent of the provided Java `readIntBE` function.
+    /// It uses the `i32::from_be_bytes` method, which is a safe and idiomatic way to
+    /// convert a 4-byte array into a signed 32-bit integer.
     ///
     /// # Arguments
     ///
-    /// * `buffer` - The byte slice to read from.
-    /// * `offset` - The starting index (offset) in the slice from which to read.
+    /// * `buffer` - A reference to the byte slice to read from.
+    /// * `offset` - The starting byte offset from which to read the 4-byte integer.
     ///
     /// # Returns
     ///
-    /// The signed 32-bit integer read, or an `io::Result` error if the read fails.
-    pub fn read_int_be(buffer: &[u8], offset: usize) -> io::Result<i32> {
-        // Check for out-of-bounds access.
-        if buffer.len() < offset + 4 {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "buffer is too short to read a 32-bit integer",
-            ));
-        }
-
-        // Create a cursor to read from the byte slice starting at the offset.
-        let mut reader = Cursor::new(&buffer[offset..]);
-
-        // Use `read_i32` with `BigEndian` to perform the read.
-        reader.read_i32::<BigEndian>()
+    /// The signed 32-bit integer read from the buffer as an `i32`.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the provided `offset` is out of bounds or if there
+    /// are fewer than 4 bytes available from the given offset.
+    pub fn read_int_be(buffer: &[u8], offset: usize) -> i32 {
+        let bytes: [u8; 4] = buffer[offset..offset + 4].try_into().unwrap();
+        i32::from_be_bytes(bytes)
     }
 
-    /// Write the given 64-bit value as a 4-byte unsigned integer at a specific position.
+    /// Writes a 4-byte unsigned integer to a specific index in a mutable byte slice.
     ///
-    /// This function truncates the input `i64` to a 32-bit unsigned integer and writes it
-    /// to the specified position in the buffer in big-endian byte order.
+    /// This function is the Rust equivalent of the provided Java `writeUnsignedInt` function.
+    /// It takes a `u32` value, converts it to a big-endian byte array, and writes it to the
+    /// specified location in the buffer without modifying its position. Overflow is handled
+    /// by the `u32` type's natural wrapping behavior if a larger value is provided.
     ///
     /// # Arguments
     ///
-    /// * `buffer` - The mutable byte slice to write to.
-    /// * `index` - The starting index (offset) in the slice at which to write.
-    /// * `value` - The `i64` value to write.
+    /// * `buffer` - A mutable reference to the byte slice to write to.
+    /// * `index` - The starting byte index from which to begin writing the 4-byte integer.
+    /// * `value` - The unsigned 32-bit integer to write.
     ///
-    /// # Returns
+    /// # Panics
     ///
-    /// An `io::Result` indicating success or failure of the write operation.
-    pub fn write_unsigned_int_from_pos(
-        buffer: &mut [u8],
-        index: usize,
-        value: i64,
-    ) -> io::Result<()> {
-        // Check for out-of-bounds access.
-        if buffer.len() < index + 4 {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "buffer is too short to write a 32-bit integer",
-            ));
-        }
-
-        // Create a mutable cursor from the sub-slice starting at the given index.
-        let mut writer = Cursor::new(&mut buffer[index..]);
-
-        // Write the value as a 32-bit unsigned integer in big-endian format.
-        writer.write_i32::<BigEndian>(value as i32)
+    /// This function will panic if the provided `index` is out of bounds or if there
+    /// are fewer than 4 bytes available from the given index to write to.
+    pub fn write_unsigned_int_at(buffer: &mut [u8], index: usize, value: u32) {
+        let bytes = value.to_be_bytes();
+        buffer[index..index + 4].copy_from_slice(&bytes);
     }
 
-    /// Write the given 64-bit signed integer as a 4-byte unsigned integer. Overflow is ignored.
+    /// Writes a 32-bit unsigned integer to a buffer, advancing the buffer's position by 4 bytes.
     ///
-    /// This function truncates the input `i64` to a 32-bit signed integer and writes it
-    /// to the writer in big-endian byte order, mimicking the behavior of the Java
-    /// `ByteBuffer.putInt()` method with a long value.
+    /// This function is the inverse of `read_unsigned_int`. It takes a `u32` value, converts it
+    /// to a 4-byte big-endian representation, and writes those bytes to the given buffer.
     ///
     /// # Arguments
     ///
-    /// * `writer` - The data sink to write to, which must implement `std::io::Write`.
-    /// * `value` - The `i64` value to write.
+    /// * `buffer` - A mutable reference to a type that implements the `std::io::Write` trait.
+    /// * `value` - The unsigned 32-bit integer to write.
     ///
-    /// # Returns
+    /// # Panics
     ///
-    /// An `io::Result` indicating success or failure of the write operation.
-    pub fn write_unsigned_int<W: io::Write>(writer: &mut W, value: i64) -> io::Result<()> {
-        writer.write_i32::<BigEndian>(value as i32)
+    /// This function will panic if it fails to write the 4 bytes to the buffer.
+    pub fn write_unsigned_int(buffer: &mut dyn io::Write, value: u32) {
+        let bytes = value.to_be_bytes();
+        buffer.write_all(&bytes).unwrap();
     }
 
     /// Writes an unsigned 32-bit integer in little-endian format to the writer.
@@ -143,8 +122,30 @@ pub mod byte_utils {
     ///
     /// * `writer` - The writer to write to.
     /// * `value` - The value to write.
-    pub fn write_unsigned_int_le(writer: &mut impl io::Write, value: i32) -> io::Result<()> {
+    pub fn write_unsigned_int_le(writer: &mut impl io::Write, value: u32) -> io::Result<()> {
         writer.write_all(&value.to_le_bytes())
+    }
+
+    /// Writes a 4-byte signed integer to a specific index in a mutable byte slice in big-endian
+    /// byte order.
+    ///
+    /// This function is the Rust equivalent of `ByteBuffer.putInt(index, value)`. It converts a
+    /// signed 32-bit integer to a big-endian byte array and writes it to the specified position.
+    ///
+    /// # Arguments
+    ///
+    /// * `buffer` - A mutable reference to the byte slice to write to.
+    /// * `index` - The starting byte index from which to begin writing the 4-byte integer.
+    /// * `value` - The signed 32-bit integer to write.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the provided `index` is out of bounds or if there
+    /// are fewer than 4 bytes available from the given index to write to.
+    #[cfg(test)]
+    pub fn write_int_be(buffer: &mut [u8], index: usize, value: i32) {
+        let bytes = value.to_be_bytes();
+        buffer[index..index + 4].copy_from_slice(&bytes);
     }
 
     #[cfg(test)]
@@ -153,28 +154,26 @@ pub mod byte_utils {
         use std::io::Cursor;
 
         #[test]
-        fn test_read_and_write_unsigned_int() {
-            // Use a Cursor to simulate a ByteBuffer for in-memory I/O.
-            let mut buffer = Cursor::new([0u8; 4]);
+        fn test_read_write_unsigned_int() {
+            // Create an in-memory buffer (a vector of bytes)
+            let mut buffer = Vec::with_capacity(4);
+            let write_value: u32 = 133444;
 
-            // The value to write is a u32, directly corresponding to the 4 bytes.
-            let write_value: i64 = 133444;
+            // Write the value to the buffer
+            write_unsigned_int(&mut buffer, write_value);
 
-            // Write the value to the buffer. `unwrap()` is used for test simplicity.
-            write_unsigned_int(&mut buffer, write_value).unwrap();
+            // Create a cursor to simulate reading from the start of the buffer
+            let mut cursor = Cursor::new(buffer);
 
-            // Reset the buffer's position to the beginning for reading.
-            buffer.set_position(0);
+            // Read the value back from the cursor
+            let read_value = read_unsigned_int(&mut cursor);
 
-            // Read the value back from the buffer.
-            let read_value = read_unsigned_int(&mut buffer).unwrap();
-
-            // Assert that the written and read values are identical.
-            assert_eq!(write_value, read_value);
+            // Assert that the value read is the same as the value written
+            assert_eq!(read_value, write_value);
         }
 
         #[test]
-        fn test_read_int() {
+        fn test_read_write_int_be() {
             let values: [i32; 11] = [
                 0,
                 1,
@@ -188,19 +187,14 @@ pub mod byte_utils {
                 i32::MIN,
                 i32::MAX,
             ];
-
-            // Create a buffer with enough space for all values.
             let mut buffer = vec![0u8; 4 * values.len()];
-            let mut cursor = Cursor::new(&mut buffer);
-
             for (i, &value) in values.iter().enumerate() {
-                // Write the value into the buffer at the correct position.
-                cursor.set_position((i * 4) as u64);
-                cursor.write_i32::<BigEndian>(value).unwrap();
-
-                // Read the value back and assert it matches.
-                let read_value = read_int_be(cursor.get_ref(), i * 4).unwrap();
-                assert_eq!(value, read_value, "Written value should match read value.");
+                write_int_be(&mut buffer, i * 4, value);
+                assert_eq!(
+                    read_int_be(&buffer, i * 4),
+                    value,
+                    "Written value should match read value."
+                );
             }
         }
 
@@ -219,7 +213,7 @@ pub mod byte_utils {
             );
 
             // Test case 2
-            let value2 = -185339151; // represents 0xf4f3f2f1 in i32
+            let value2 = 0xf4f3f2f1;
             let mut buffer2 = Cursor::new(Vec::new());
             write_unsigned_int_le(&mut buffer2, value2).unwrap();
 

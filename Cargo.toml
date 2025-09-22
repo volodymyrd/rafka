@@ -12,5 +12,3 @@ license = "Apache-2.0"
 edition = "2024"
 
 [workspace.dependencies]
-byteorder = "1.5.0"
-rafka-clients = { path = "clients" }
