@@ -472,7 +472,7 @@ pub mod byte_utils {
     ///
     /// * `value` - The u64 value to encode.
     /// * `writer` - A mutable reference to a type that implements `io::Write`,
-    ///              where the encoded bytes will be written.
+    ///   where the encoded bytes will be written.
     /// # Returns
     ///
     /// Returns a `VarintError` if an I/O error occurs during the write operation.
