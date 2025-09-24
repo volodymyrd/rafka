@@ -276,6 +276,76 @@ pub mod byte_utils {
         Ok((unsigned_value >> 1) as i32 ^ (-((unsigned_value & 1) as i32)))
     }
 
+    /// Reads a signed 64-bit integer from a variable-length format using zig-zag decoding,
+    /// as defined by [Google Protocol Buffers](http://code.google.com/apis/protocolbuffers/docs/encoding.html).
+    ///
+    /// Zig-zag encoding is a pre-processing step that transforms signed integers into unsigned
+    /// integers in a way that is highly compatible with Varint encoding.
+    /// It ensures that signed numbers with a small absolute value (like -1, 2, -5) are mapped
+    /// to small unsigned numbers, allowing them to be stored in a single byte, saving massive
+    /// amounts of space.
+    ///
+    /// It first reads an unsigned varint and then decodes the zig-zag format.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `R`: A type that implements the `io::Read` trait (e.g., `File`, `&[u8]`).
+    ///
+    /// # Arguments
+    ///
+    /// * `reader`: A mutable reference to the input source to read from.
+    ///
+    /// # Returns
+    ///
+    /// On success, returns `Ok(i64)` containing the decoded signed integer.
+    ///
+    /// # Errors
+    ///
+    /// This function will propagate any errors encountered during the underlying
+    /// unsigned varint read, such as `VarintError::Io` or `VarintError::VarintTooLong`.
+    pub fn read_varint64<R: io::Read>(reader: &mut R) -> VarintResult<i64> {
+        // Read the raw unsigned varint from the stream. The `?` operator will
+        // propagate any errors, such as I/O issues or a varint that's too long.
+        let unsigned_value = read_unsigned_varint64(reader)?;
+
+        // Perform zig-zag decoding to convert the unsigned value back to signed.
+        // (n >>> 1) ^ -(n & 1) in Java/C becomes the following in Rust:
+        Ok((unsigned_value >> 1) as i64 ^ (-((unsigned_value & 1) as i64)))
+    }
+
+    /// Reads an unsigned variable-length 64-bit integer from a reader.
+    fn read_unsigned_varint64<R: io::Read>(reader: &mut R) -> VarintResult<u64> {
+        let mut result = 0u64;
+        let mut shift = 0;
+
+        // A u64 varint can be at most 10 bytes long.
+        for i in 0..10 {
+            let mut buffer = [0u8; 1];
+            reader.read_exact(&mut buffer)?;
+            let byte = buffer[0];
+
+            // On the 10th byte, the MSB must be 0. If it's set, the varint is too long.
+            if i == 9 && (byte & 0x80) != 0 {
+                return Err(VarintError::VarintTooLong);
+            }
+
+            // Add the lower 7 bits of the byte to the result.
+            result |= ((byte & 0x7f) as u64) << shift;
+
+            // If the most significant bit (MSB) is 0, we're done.
+            if (byte & 0x80) == 0 {
+                return Ok(result);
+            }
+
+            shift += 7;
+        }
+
+        // This code is unreachable if the loop runs 10 times, as the check
+        // for the 10th byte will either return an error or the `read_exact` will fail.
+        // It's included for logical completeness.
+        Err(VarintError::UnterminatedVarint)
+    }
+
     /// Writes the given unsigned 32-bit integer following the variable-length unsigned
     /// encoding from Google Protocol Buffers to a writer.
     ///
@@ -394,6 +464,45 @@ pub mod byte_utils {
         let encoded = ((value << 1) ^ (value >> 31)) as u32;
 
         write_unsigned_varint(encoded, writer)
+    }
+
+    /// Encodes a u64 into a variable-length integer and writes it to a writer.
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - The u64 value to encode.
+    /// * `writer` - A mutable reference to a type that implements `io::Write`,
+    ///              where the encoded bytes will be written.
+    /// # Returns
+    ///
+    /// Returns a `VarintError` if an I/O error occurs during the write operation.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an `Err` if the underlying write operation to the
+    /// writer fails at any point.
+    pub fn write_unsigned_varint64<W: io::Write>(
+        mut value: u64,
+        writer: &mut W,
+    ) -> VarintResult<()> {
+        // While the value is too large to fit in the final 7 bits,
+        // write continuation bytes.
+        while value >= 0x80 {
+            // 1. Take the lower 7 bits of the value.
+            // 2. Set the most significant bit (MSB) to 1 to indicate more bytes are coming.
+            let byte_to_write = (value as u8 & 0x7f) | 0x80;
+
+            // Write the single byte to the writer.
+            writer.write_all(&[byte_to_write])?;
+
+            // Unsigned right shift the value by 7 bits to process the next chunk.
+            value >>= 7;
+        }
+
+        // Write the final byte. The MSB is 0, indicating the end of the varlong.
+        writer.write_all(&[value as u8])?;
+
+        Ok(())
     }
 
     #[cfg(test)]
@@ -608,6 +717,87 @@ pub mod byte_utils {
                 read_varint(&mut buf),
                 Err(VarintError::VarintTooLong)
             ));
+        }
+
+        #[test]
+        fn test_correctness_read_unsigned_varint64() {
+            // The "simpleImplementation" from the Java test, converted to a Rust closure.
+            // It takes anything that implements `io::Read` and returns a Result.
+            let simple_read_impl = |reader: &mut dyn Read| -> Result<u64, &'static str> {
+                let mut value = 0u64;
+                let mut i: u64 = 0;
+                loop {
+                    let mut buf = [0];
+                    reader
+                        .read_exact(&mut buf)
+                        .map_err(|_| "Failed to read byte")?;
+                    let b = buf[0];
+
+                    if (b & 0x80) == 0 {
+                        // This is the last byte.
+                        value |= (b as u64) << i;
+                        return Ok(value);
+                    } else {
+                        value |= ((b & 0x7F) as u64) << i;
+                        i += 7;
+                        if i > 63 {
+                            // Varint is too long.
+                            return Err("Invalid varint: exceeds 10 bytes");
+                        }
+                    }
+                }
+            };
+
+            let mut test_buffer = Vec::new();
+
+            // --- Test Case Generation ---
+            // Instead of a slow linear scan, we generate a list of critical values
+            // to test. This is much faster and more effective.
+            let mut test_values = vec![0, 1, u64::MAX];
+
+            // Add boundary values around powers of 2, which are the most likely
+            // places for encoding/decoding errors to occur.
+            for n in 1..64 {
+                let base = 1u64 << n;
+                test_values.push(base.saturating_sub(1)); // e.g., 127 (0b0111_1111)
+                test_values.push(base); // e.g., 128 (0b1000_0000)
+                if let Some(plus_one) = base.checked_add(1) {
+                    test_values.push(plus_one); // e.g., 129
+                }
+            }
+
+            // Sort and remove duplicates for a clean test run.
+            test_values.sort();
+            test_values.dedup();
+
+            println!(
+                "Testing {} critical u64 values for varint correctness...",
+                test_values.len()
+            );
+
+            for i in test_values {
+                // Write the test value into our buffer.
+                write_unsigned_varint64(i, &mut test_buffer)
+                    .expect("Writing to vec should not fail");
+
+                // --- Verification using the function under test ---
+                // Wrap the buffer in a Cursor to make it readable.
+                // Equivalent to `testData.flip()` and `testData.duplicate()`.
+                let mut cursor1 = Cursor::new(&test_buffer);
+                let actual = read_unsigned_varint64(&mut cursor1)
+                    .expect("The function under test failed to read a valid varint");
+
+                // --- Verification using the reference implementation ---
+                let mut cursor2 = Cursor::new(&test_buffer);
+                let expected = simple_read_impl(&mut cursor2)
+                    .expect("The simple reference implementation failed to read a valid varint");
+
+                // The main assertion, equivalent to `assertEquals(expected, actual);`
+                assert_eq!(expected, actual, "Mismatch for value: {}", i);
+
+                // Equivalent to `testData.clear();`
+                test_buffer.clear();
+            }
         }
 
         // Helper function to assert that a value is serialized to the expected bytes,
