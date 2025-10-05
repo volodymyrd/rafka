@@ -1,5 +1,5 @@
 [workspace]
-members = ["clients"]
+members = ["clients", "core"]
 
 resolver = "2"
 
@@ -13,3 +13,8 @@ edition = "2024"
 
 [workspace.dependencies]
 thiserror = "2.0.16"
+clap = { version = "4.5.48", features = ["derive"] }
+tokio = { version = "1.47.1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
+indexmap = "2"
