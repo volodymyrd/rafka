@@ -1,24 +1,17 @@
-use crate::server::rafka_config::RaftConfig;
+use crate::server::rafka_config::RafkaConfig;
 use crate::server::{Result, Server};
 
-/**
- * This struct implements the KRaft (Kafka Raft) mode server which relies
- * on a KRaft quorum for maintaining cluster metadata. It is responsible for
- * constructing the controller and/or broker based on the `process.roles`
- * configuration and for managing their basic lifecycle (startup and shutdown).
- *
- */
-pub(crate) struct RafkaRaftServer {
-    raft_config: RaftConfig,
+pub(crate) struct RaftServer {
+    config: RafkaConfig,
 }
 
-impl RafkaRaftServer {
-    pub fn new(raft_config: RaftConfig) -> Self {
-        Self { raft_config }
+impl RaftServer {
+    pub fn new(config: RafkaConfig) -> Self {
+        Self { config }
     }
 }
 
-impl Server for RafkaRaftServer {
+impl Server for RaftServer {
     async fn startup(&self) -> Result<()> {
         todo!()
     }

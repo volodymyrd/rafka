@@ -1,11 +1,19 @@
+mod network;
 mod server;
+#[cfg(test)]
+pub mod test;
 
-use crate::server::rafka_raft_server::RafkaRaftServer;
+use crate::server::rafka_config::RafkaConfig;
+use crate::server::rafka_raft_server::RaftServer;
 use crate::server::{Result, Server};
 use clap::Parser;
+use easy_config_def::FromConfigDef;
+use rafka_clients::common::utils::utils::load_props;
+use std::collections::HashMap;
 use std::error::Error;
+use std::iter::Map;
 use tokio::signal;
-use tracing::info;
+use tracing::{debug, info};
 
 /// A Kafka-compatible broker implemented in Rust.
 #[derive(Parser, Debug)]
@@ -23,23 +31,20 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     set_up_logging()?;
+    let server_props = get_props_from_args(Args::parse());
+    debug!("{server_props:?}");
+    let server = build_server(server_props);
 
-    // 1. Parse Command-Line Arguments
-    // In the original Scala code, this is handled by `getopt`.
-    // We use `clap` for a more robust and idiomatic Rust implementation.
-    let _server_props = Args::parse();
-    let server = build_server();
+    //server.startup().await?;
 
-    server.startup().await?;
+    // tokio::select! {
+    //     _ = signal::ctrl_c() => {
+    //         // The shutdown signal has been received.
+    //         info!("shutting down");
+    //     }
+    // }
 
-    tokio::select! {
-        _ = signal::ctrl_c() => {
-            // The shutdown signal has been received.
-            info!("shutting down");
-        }
-    }
-
-    server.await_shutdown().await?;
+    //server.await_shutdown().await?;
 
     Ok(())
 }
@@ -48,9 +53,14 @@ fn set_up_logging() -> std::result::Result<(), Box<dyn Error + Send + Sync + 'st
     // See https://docs.rs/tracing for more info
     tracing_subscriber::fmt::try_init()
 }
+fn get_props_from_args(args: Args) -> HashMap<String, String> {
+    load_props(args.server_properties_file.as_str()).expect("Error loading properties file")
+}
 
-fn build_server() -> impl Server {
-    RafkaRaftServer::new()
+fn build_server(props: HashMap<String, String>) {
+    let config = RafkaConfig::from_props(&props);
+    debug!("{config:?}");
+    //RaftServer::new()
 }
 
 async fn run_broker(args: Args) -> std::result::Result<(), Box<dyn std::error::Error>> {

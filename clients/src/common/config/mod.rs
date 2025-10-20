@@ -1,2 +1,1 @@
-pub mod config_def;
-pub mod types;
+pub mod topic_config;

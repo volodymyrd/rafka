@@ -8,8 +8,18 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-thiserror = { workspace = true }
 clap = { workspace = true }
+easy-config-def = { workspace = true }
+once_cell = { workspace = true }
+rafka-clients = { workspace = true }
+rafka-server = { workspace = true }
+rafka-server-common = { workspace = true }
+rafka-storage = { workspace = true }
+rafka-group-coordinator = { workspace = true }
+thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
